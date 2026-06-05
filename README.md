@@ -1,6 +1,6 @@
 # enerstasis-electricity-forecaster
 
-AI based electricty demand forecaster that uses a Temporal Fusion Transformer model plus SHAP with a scenario engine for capacity planning as well.
+AI based electricty demand forecaster that uses a Temporal Fusion Transformer model plus SHAP with a scenario engine for future and capacity planning.
 
 ## Dataset
 
