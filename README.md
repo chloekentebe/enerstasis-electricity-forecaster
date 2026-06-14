@@ -9,7 +9,7 @@ This project uses data from multiple sources:
 - ERA5
 - Ontario Ministry of Education, Ministry of Finance, Ministry of Energy and Mines
 - Canadian Disaster Database, Statistics Canada, Natural Resources Canada
-- City of Torono
+- City of Toronto
 
 ## Repository Structure
 
