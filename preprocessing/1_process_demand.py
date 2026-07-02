@@ -1,5 +1,5 @@
 # create an intermediate dataset with columns
-# timestamp,ontario_demand_mw,year,month,day,hour,monthly_peak_mw,monthly_peak_time,monthly_min_mw_monthly_min_time
+# timestamp,ontario_demand_mw,market_demand_mw,year,month,day,hour,monthly_peak_mw,monthly_peak_time,monthly_min_mw_monthly_min_time
 
 from pathlib import Path # for extracting files in data/ieso_demand
 import pandas as pd # for tabular data
