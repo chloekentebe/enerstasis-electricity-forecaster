@@ -3,7 +3,6 @@
 
 from pathlib import Path # for extracting files in data/ieso_demand
 import pandas as pd # for tabular data
-import glob
 
 data_dir = Path("data/ieso_demand")
 processed_dir = Path("processed_data")
@@ -11,10 +10,9 @@ processed_dir.mkdir(parents=True, exist_ok=True)
 
 files = sorted(data_dir.glob("PUB_Demand_*.csv")) # returns a list of all files
 
-
 dataframes = []
 for file in files:
-    df = pd.read_csv(file,comment='\\')
+    df = pd.read_csv(file, comment='\\')
     dataframes.append(df)
 
 # stack dfs vertifcally
@@ -88,14 +86,14 @@ df = df.merge(
 
 # drop date and hour because they're not needed and timestamps exist
 df = df.drop(columns=["Date", "Hour"])
-df = df [[
+df = df[[
     "timestamp",
     "ontario_demand_mw",
     "market_demand_mw",
     "year",
     "month",
     "day",
-    "hour"
+    "hour",
     "monthly_peak_mw",
     "monthly_peak_time",
     "monthly_min_mw",
