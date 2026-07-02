@@ -3,3 +3,5 @@
 
 # virtual environments
 .venv
+
+data/era5_weather

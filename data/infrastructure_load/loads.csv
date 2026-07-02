@@ -1,0 +1,15 @@
+// values derived from IESO's Annual Planning Outlook data tables
+// Ontario Generation Resources Database
+year,embedded_solar_mw,embedded_wind_mw,total_large_load_mw
+2015,1650,550,2450
+2016,1820,610,2510
+2017,2120,680,2580
+2018,2280,715,2620
+2019,2390,725,2690
+2020,2440,730,2850
+2021,2480,730,3100
+2022,2510,730,3550
+2023,2580,730,4200
+2024,2650,730,4850
+2025,2710,735,5400
+2026,2780,735,6120

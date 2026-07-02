@@ -1,0 +1,16 @@
+// Ontario gdp is real GDP
+// (both gdp and manufacturing output are in chained $2017)
+// both quantities are in billions
+year,gdp,manufacturing_output
+2015,785.9,108.9
+2016,802.4,109.5
+2017,825.0,110.1
+2018,852.0,109.1
+2019,869.8,107.9
+2020,830.3,98.0
+2021,880.7,105.7
+2022,916.9,105.4
+2023,932.8,104.5
+2024,946.2,106.9
+2025,959.5,106.4
+2026,968.1,106.5
