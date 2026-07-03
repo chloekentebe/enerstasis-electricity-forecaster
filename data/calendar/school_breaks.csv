@@ -1,6 +1,6 @@
 \\ start/end is year-month-day
 \\ used TDSB dates
-school_year,break,start,end
+school_year,break,start_break,end_break
 2026,summer,2026-06-26,2026-09-07
 2026,spring,2026-03-13,2026-03-17
 2025,winter, 2025-12-26,2026-01-06
