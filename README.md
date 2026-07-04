@@ -15,7 +15,8 @@ This project uses data from multiple sources:
 
 ```text
 data/
-feature_engineering/
+processed_data/
+preprocessing/
 tft_shap_model/
 xgboost_model/
 notebooks/
