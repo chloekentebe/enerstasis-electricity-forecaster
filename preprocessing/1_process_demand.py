@@ -84,6 +84,8 @@ df = df.merge(
     how="left"
 )
 
+df[""]
+
 # drop date and hour because they're not needed and timestamps exist
 df = df.drop(columns=["Date", "Hour"])
 df = df[[

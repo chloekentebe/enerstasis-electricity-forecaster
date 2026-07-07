@@ -83,39 +83,72 @@ calendar["geological_event"] = 0
 calendar["technology_event"] = 0
 calendar["conflict_event"] = 0
 
-mask = (calendar["timestamp"].isin(disaster_df["EVENT_START_DATE"]))
-event_mask = disaster_df["EVENT_TYPE_DESCRIPTION"].isin([
-    "Storms and Severe Thunderstorms",
-    "Flood",
-    "Wildfire",
-    "Drought",
-    "Heat Event",
-])
-combined_mask = mask & event_mask
-calendar.loc[combined_mask, "extreme_weather"] = 1
+# extreme weather dataframe
+ew_df = disaster_df[
+    disaster_df["EVENT_TYPE_DESCRIPTION"].isin([
+        "Storms and Severe Thunderstorms",
+        "Flood",
+        "Wildfire",
+        "Drought",
+        "Heat Event",
+    ])
+]
 
-event_mask = disaster_df["EVENT_TYPE_DESCRIPTION"].isin([
-    "Landslide",
-])
-combined = mask & event_mask
-calendar.loc[combined_mask, "geological_event"] = 1
+for _, row in ew_df.iterrows():
+    start = row["EVENT_START_DATE"]
+    end = row["EVENT_END_DATE"]
+    mask = (
+        (calendar["timestamp"] >= start) & (calendar["timestamp"] <= end + pd.Timedelta(days=1))
+    )
+    calendar.loc[mask, "extreme_weather"] = 1
 
-event_mask = disaster_df["EVENT_SUBGROUP_NAME"].isin([
-    "Fire",
-    "Explosion",
-    "Infrastructure failure",
-    "Transportation accident",
-    "Hazardous Chemicals",
-])
-combined = mask & event_mask
-calendar.loc[combined_mask, "technology_event"] = 1
-event_mask = disaster_df["EVENT_SUBGROUP_NAME"].isin([
-    "Civil Incident",
-    "Terrorist",
-    "Arson",
-])
-combined = mask & event_mask
-calendar.loc[combined_mask, "conflict_event"] = 1
+# geological event dataframe
+g_df = disaster_df[
+    disaster_df["EVENT_TYPE_DESCRIPTION"].isin([
+        "Landslide",
+    ])
+]
+for _, row in g_df.iterrows():
+    start = row["EVENT_START_DATE"]
+    end = row["EVENT_END_DATE"]
+    mask = (
+        (calendar["timestamp"] >= start) & (calendar["timestamp"] <= end + pd.Timedelta(days=1))
+    )
+    calendar.loc[mask, "geological_event"] = 1
+
+# tech event dataframe
+t_df = disaster_df[
+    disaster_df["EVENT_SUBGROUP_NAME"].isin([
+        "Fire",
+        "Explosion",
+        "Infrastructure failure",
+        "Transportation accident",
+        "Hazardous Chemicals",
+    ])
+]
+for _, row in t_df.iterrows():
+    start = row["EVENT_START_DATE"]
+    end = row["EVENT_END_DATE"]
+    mask = (
+        (calendar["timestamp"] >= start) & (calendar["timestamp"] <= end + pd.Timedelta(days=1))
+    )
+    calendar.loc[mask, "technology_event"] = 1
+
+# conflict event dataframe
+c_df = disaster_df[
+    disaster_df["EVENT_SUBGROUP_NAME"].isin([
+        "Civil Incident",
+        "Terrorist",
+        "Arson",
+    ])
+]
+for _, row in c_df.iterrows():
+    start = row["EVENT_START_DATE"]
+    end = row["EVENT_END_DATE"]
+    mask = (
+        (calendar["timestamp"] >= start) & (calendar["timestamp"] <= end + pd.Timedelta(days=1))
+    )
+    calendar.loc[mask, "conflict_event"] = 1
 
 # CYCLICAL ENCODING
 calendar["hour_sin"] = np.sin(2*np.pi*calendar["hour"]/24)

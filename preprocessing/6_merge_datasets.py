@@ -4,6 +4,7 @@
 
 from pathlib import Path
 import pandas as pd
+import numpy as np
 
 directory = Path("processed_data")
 
@@ -123,7 +124,7 @@ main = pd.get_dummies(
     main, columns=["season"], dtype=int,
 )
 print("main isna:", main.isna().sum())
-print("main shape:", main.shape)
+#print("main shape:", main.shape)
 
 print("num of duplication timestamps:", main["timestamp"].duplicated().sum())
 main = main.sort_values("timestamp")
@@ -144,5 +145,44 @@ cols = [
 ]
 main.loc[main["timestamp"] < "2017-01-01", cols] = 0
 
+const_cols = [
+    c for c in main.columns if c != "timestamp" and main[c].nunique() <= 1
+]
+print("const cols:", const_cols)
+bool_cols = ["bruce_snow_indicator",
+    "east_snow_indicator",
+    "essa_snow_indicator", 
+    "niagara_snow_indicator",
+    "northeast_snow_indicator", 
+    "northwest_snow_indicator", 
+    "ottawa_snow_indicator", 
+    "southwest_snow_indicator",
+    "toronto_snow_indicator", 
+    "west_snow_indicator"
+]
+for c in bool_cols:
+    main[c] = main[c].astype(str).str.strip().str.lower()
+    main[c] = main[c].map({'true': 1, 'false': 0})
+
+main["monthly_peak_time"] = pd.to_datetime(main["monthly_peak_time"], errors="coerce")
+main["monthly_min_time"] = pd.to_datetime(main["monthly_min_time"], errors="coerce")
+
+monthly_peak_hour = main["monthly_peak_time"].dt.hour + (main["monthly_peak_time"].dt.minute / 60.0)
+monthly_min_hour = main["monthly_min_time"].dt.hour + (main["monthly_min_time"].dt.minute / 60.0)
+
+main["monthly_peak_hour_sin"] = np.sin(2*np.pi*monthly_peak_hour/24.0)
+main["monthly_peak_hour_cos"] = np.cos(2*np.pi*monthly_peak_hour/24.0)
+
+main["monthly_min_hour_sin"] = np.sin(2*np.pi*monthly_min_hour/24.0)
+main["monthly_min_hour_cos"] = np.cos(2*np.pi*monthly_min_hour/24.0)
+
+main = main.drop(columns=["monthly_peak_time", "monthly_min_time"])
+main = main.drop(columns=["year", "month", "day", "hour", "day_of_week", "day_of_year"])
+
+print("main shape:", main.shape)
+print(main.describe()) # statistics
+
 output_file = directory / "main_dataset.csv"
 main.to_csv(output_file, index=False)
+main.describe().T.index.name = "Feature"
+main.describe().T.to_csv(directory / "main_statistics.csv")
