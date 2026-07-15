@@ -179,6 +179,19 @@ main["monthly_min_hour_cos"] = np.cos(2*np.pi*monthly_min_hour/24.0)
 main = main.drop(columns=["monthly_peak_time", "monthly_min_time"])
 main = main.drop(columns=["year", "month", "day", "hour", "day_of_week", "day_of_year"])
 
+# 24-hour forecast profile
+for hour in range(1, 25):
+    main[f"demand_target_hour_{hour}"] = main["ontario_demand_mw"].shift(-hour)
+
+main["demand_lag_1"] = main["ontario_demand_mw"].shift(1)
+main["demand_lag_24"] = main["ontario_demand_mw"].shift(24)
+main["demand_lag_168"] = main["ontario_demand_mw"].shift(168)
+main["demand_rolling24_mean"] = main["ontario_demand_mw"].rolling(window=24).mean()
+main["demand_rolling24_std"] = main["ontario_demand_mw"].rolling(window=24).std()
+print(main.isna().sum())
+main = main.dropna().reset_index(drop=True)
+print(main.isna().sum())
+
 print("main shape:", main.shape)
 print(main.describe()) # statistics
 
