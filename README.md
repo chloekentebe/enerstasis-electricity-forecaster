@@ -17,7 +17,7 @@ This project uses data from multiple sources:
 data/
 processed_data/
 preprocessing/
-tft_shap_model/
+primry_model/
 xgboost_model/
 notebooks/
 results/
