@@ -5,3 +5,5 @@
 .venv
 
 data/era5_weather
+
+primary_model/checkpoints
