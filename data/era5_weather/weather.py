@@ -39,13 +39,13 @@ for zone, (lat, lon) in IESO_ZONE_COORDS.items():
     request["location"] = {"latitude": lat, "longitude": lon}
 
     for year in range(2015, 2027):
-        last_month = 6 if year == 2025 else 12
+        last_month = 7 if year == 2026 else 12
 
         for month in range(1, last_month + 1):
             days = monthrange(year, month)[1]
 
-            if year == 2026 and month == 6:
-                days = 17 # limit from era5
+            if year == 2026 and month == 7:
+                days = 24 # limit from era5
 
             start_date = f"{year}-{month:02d}-01"
             end_date = f"{year}-{month:02d}-{days:02d}"
