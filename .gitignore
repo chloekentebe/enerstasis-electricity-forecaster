@@ -4,6 +4,6 @@
 # virtual environments
 .venv
 
-data/era5_weather
+data/era5_weather/*.csv
 
 primary_model/checkpoints

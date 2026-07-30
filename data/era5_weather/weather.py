@@ -38,20 +38,33 @@ dir.mkdir(parents=True, exist_ok=True)
 for zone, (lat, lon) in IESO_ZONE_COORDS.items():
     request["location"] = {"latitude": lat, "longitude": lon}
 
-    for year in range(2015, 2027):
+    for year in range(2025, 2027):
         last_month = 7 if year == 2026 else 12
 
-        for month in range(1, last_month + 1):
-            days = monthrange(year, month)[1]
+        if year == 2025:
+            for month in range(6, 12 + 1):
+                days = monthrange(year, month)[1]
 
-            if year == 2026 and month == 7:
-                days = 24 # limit from era5
+                start_date = f"{year}-{month:02d}-01"
+                end_date = f"{year}-{month:02d}-{days:02d}"
+                request["date"] = [f"{start_date}/{end_date}"]
+                filename = dir / f"{zone}_{year}_{month:02d}.csv"
+                
+                client.retrieve(
+                    dataset,
+                    request).download(str(filename))
+        else:
+            for month in range(6, 7 + 1):
+                days = monthrange(year, month)[1]
 
-            start_date = f"{year}-{month:02d}-01"
-            end_date = f"{year}-{month:02d}-{days:02d}"
-            request["date"] = [f"{start_date}/{end_date}"]
-            filename = dir / f"{zone}_{year}_{month:02d}.csv"
-            
-            client.retrieve(
-                dataset,
-                request).download(str(filename))
+                if month == 7:
+                    days = 24 # limit from era5
+
+                start_date = f"{year}-{month:02d}-01"
+                end_date = f"{year}-{month:02d}-{days:02d}"
+                request["date"] = [f"{start_date}/{end_date}"]
+                filename = dir / f"{zone}_{year}_{month:02d}.csv"
+                
+                client.retrieve(
+                    dataset,
+                    request).download(str(filename))
