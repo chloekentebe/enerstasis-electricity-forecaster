@@ -83,7 +83,7 @@ se_infra = loads \
 timeline = pd.DataFrame({
     "timestamp": pd.date_range(
         "2015-01-01",
-        "2026-06-17 23:00",
+        "2026-07-24 23:00",
         freq="h"
     )
 })

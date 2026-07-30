@@ -16,7 +16,7 @@ school_df = pd.read_csv(file, comment='\\')
 calendar = pd.DataFrame({
     "timestamp": pd.date_range(
         start="2015-01-01 00:00",
-        end="2026-06-17 23:00",
+        end="2026-07-24 23:00",
         freq="h"
     )
 })
