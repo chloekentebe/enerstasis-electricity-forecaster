@@ -51,7 +51,7 @@ class TemporalFusionTransformer(nn.Module):
         self.position_wide_ff = GatedResidualNetwork(hidden_size, hidden_size, hidden_size, dropout)
         self.post_ff_gate = GateAddNorm(hidden_size, hidden_size, dropout)
 
-        self.output_layer = nn.Linear(hidden_size, 1) # single-point forecast
+        self.output_layer = nn.Linear(hidden_size, 3) # quantile forecast (0.1, 0.5, 0.9)
     
     def embed_(self, feature_dict):
         # feature_dict[name]: (B, T, 1) raw --> (B, T, input_size) embedded
@@ -94,7 +94,7 @@ class TemporalFusionTransformer(nn.Module):
         final = self.post_ff_gate(ff_out, attn_gated)                            # (B, 24, H)
 
         # Dense output
-        forecast = self.output_layer(final).squeeze(-1)                          # (B, 24)
+        forecast = self.output_layer(final)                                      # (B, 24, 3)
 
         return forecast, {
             "encoder_vsn_weights": encoder_weights,     # (B, 168, num_past_features)

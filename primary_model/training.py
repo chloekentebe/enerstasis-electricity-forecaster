@@ -24,7 +24,7 @@ impor_dir = Path("notebooks")
 f = impor_dir / "xgboost_feature_importance.csv"
 df_import = pd.read_csv(f)
 top_feats = df_import.sort_values("importance", ascending=False).head(102)["feature"].tolist()
-keep = ["ontario_demand_mw", "season_fall"]
+keep = ["ontario_demand_mw", "season_fall", "phev_registration", "total_large_load_mw"]
 main_trimmed = main[top_feats + keep].copy()
 print(main_trimmed)
 
@@ -37,10 +37,13 @@ train_set = train_set[top_feats + keep]
 val_set = val_set[top_feats + keep]
 test_set = test_set[top_feats + keep]
 
+
 features = top_feats + keep
 # USING TRAIN SET MEAN AND STD for z-score normalization
+
 f_mean = train_set[features].mean()
 f_std = train_set[features].std()
+
 train_set[features] = (train_set[features] - f_mean) / f_std
 val_set[features] = (val_set[features] - f_mean) / f_std
 test_set[features] = (test_set[features] - f_mean) / f_std
@@ -89,10 +92,23 @@ def classify_feature_names(df, target_col, exclude_columns=None):
     columns = [col for col in df.columns if col not in exclude_columns]
     fut_columns = [
         "hour_sin", "hour_cos", "dow_sin", "dow_cos", "month_sin", "month_cos", "doy_sin", "doy_cos",
-        "is_weekend","is_holiday", "season_fall", "season_spring", "season_summer", "season_winter"
+        "is_weekend","is_holiday", "season_fall", "season_spring", "season_summer", "season_winter",
+        "phev_registration", "bev_registration", "total_large_load_mw", "embedded_solar_mw"
     ]
     past_columns = [col for col in columns if col not in fut_columns]
     return fut_columns, past_columns
+
+# ADDED: loss function for quantile predictions (0.1, 0.5, 0.9 as used in paper)
+def quant_loss(target, predictions, quantiles=(0.1, 0.5, 0.9)):
+    # adds a final dimension with size 1 in order to compare
+    loss_list = []
+    for num, qt in enumerate(quantiles):
+         # subtract forecast (B, 24) from target (B, 24)
+         errors = target - predictions[..., num]
+         # pinball (quantile) loss --> model is more penalized when q=0.9 vs q=0.1
+         loss_list.append(torch.max((qt - 1)*errors, qt*errors))
+    # averaging is smoother for backpropogation
+    return torch.stack(loss_list, dim=-1).mean() # (B, 24, 3)
 
 def train_for_one_epoch(device, model, tr_loader, optimizer):
     model.train()
@@ -103,13 +119,14 @@ def train_for_one_epoch(device, model, tr_loader, optimizer):
         fut_dict = {k: v.to(device) for k, v in fut_dict.items()}
         optimizer.zero_grad()
         forecast, _ = model(p_dict, fut_dict)
-        loss = F.mse_loss(forecast, target)
+        #loss = F.mse_loss(forecast, target)
+        loss = quant_loss(target, forecast, quantiles=(0.1, 0.5, 0.9))
         loss.backward()
         optimizer.step()
         total_loss += loss.item() * target.size(0)
     return total_loss / len(tr_loader.dataset)
 
-def get_val_loss(device, model, val_loader):
+def get_val_loss(device, model, val_loader, ):
     model.eval()
     total_loss = 0.0
     with torch.no_grad():
@@ -118,7 +135,8 @@ def get_val_loss(device, model, val_loader):
             p_dict = {k: v.to(device) for k, v in p_dict.items()}
             fut_dict = {k: v.to(device) for k, v in fut_dict.items()}
             forecast, _ = model(p_dict, fut_dict)
-            loss = F.mse_loss(forecast, target)
+            #loss = F.mse_loss(forecast, target)
+            loss = quant_loss(target, forecast, quantiles=(0.1, 0.5, 0.9))
             total_loss += loss.item() * target.size(0)
         return total_loss / len(val_loader.dataset)
 
@@ -136,7 +154,7 @@ def objective(trial, train_ds, val_ds, past_feature_names, future_feature_names,
     model = TemporalFusionTransformer(past_feature_names, future_feature_names, input_size=hs,
                                       hidden_size=hs, n_heads=n_heads, dropout=dropout).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    naming = f"trial{trial.number:02d}_h{hs}_lr{lr:.0e}_bs{bs}_do{dropout:.2f}_heads{n_heads}"
+    naming = f"final_trial{trial.number:02d}_h{hs}_lr{lr:.0e}_bs{bs}_do{dropout:.2f}_heads{n_heads}"
     best_val_loss = float("inf")
     loss_hist = {"train_loss": [], "val_loss": []}
 
@@ -268,35 +286,36 @@ if __name__ == "__main__":
     )
     print("BEST TRIAL:", study.best_trial.number, study.best_trial.params)
 
-    d_mean = f_mean["ontario_demand_mw"]
-    d_std = f_std["ontario_demand_mw"]
-    test_loader = DataLoader(train_ds, batch_size=64, shuffle=True)
-    cp = torch.load("/Users/chloekentebe/enerstasis-electricity-forecaster/primary_model/checkpoints/trial07_h128_lr4e-04_bs64_do0.17_heads4_epoch25_best.pt", "cpu")
-    model = TemporalFusionTransformer(
-        past_feature_names, future_feature_names,
-        input_size=128, hidden_size=128,
-        n_heads=cp["config"]["n_heads"], dropout=cp["config"]["dropout"],
-    ).to("cpu")
-    model.load_state_dict(cp["model_state"])
-    metrics, results = test_evaluation(model, test_loader, d_mean, d_std, "cpu")
-    print(metrics)
-    #print(results)
-    importance = tft_feat_importance(results["encoder_weights"], results["attention_weights"])
-    # dataframe for top 10 features per forecast hour
-    t20_h = {}
-    for h in range(24):
-        h_imp = importance[h]
-        inds = h_imp.argsort(descending=True)[:20]
-        t20_h[f"hour_{h+1}"] = [past_feature_names[ind] for ind in inds]
-    top20_feats = pd.DataFrame(t20_h)
-    top20_feats.index = [f"rank_{n+1}" for n in range(20)]
-    print(top20_feats)
-    top20_feats.to_csv("top20_feats_ph.csv")
+    # PERFORMANCE EVALUATION BELOW
+    # d_mean = f_mean["ontario_demand_mw"]
+    # d_std = f_std["ontario_demand_mw"]
+    # test_loader = DataLoader(train_ds, batch_size=64, shuffle=True)
+    # cp = torch.load("/Users/chloekentebe/enerstasis-electricity-forecaster/primary_model/checkpoints/trial07_h128_lr4e-04_bs64_do0.17_heads4_epoch25_best.pt", "cpu")
+    # model = TemporalFusionTransformer(
+    #     past_feature_names, future_feature_names,
+    #     input_size=128, hidden_size=128,
+    #     n_heads=cp["config"]["n_heads"], dropout=cp["config"]["dropout"],
+    # ).to("cpu")
+    # model.load_state_dict(cp["model_state"])
+    # metrics, results = test_evaluation(model, test_loader, d_mean, d_std, "cpu")
+    # print(metrics)
+    # #print(results)
+    # importance = tft_feat_importance(results["encoder_weights"], results["attention_weights"])
+    # # dataframe for top 10 features per forecast hour
+    # t20_h = {}
+    # for h in range(24):
+    #     h_imp = importance[h]
+    #     inds = h_imp.argsort(descending=True)[:20]
+    #     t20_h[f"hour_{h+1}"] = [past_feature_names[ind] for ind in inds]
+    # top20_feats = pd.DataFrame(t20_h)
+    # top20_feats.index = [f"rank_{n+1}" for n in range(20)]
+    # print(top20_feats)
+    # top20_feats.to_csv("top20_feats_ph.csv")
     
-    f_occurences = Counter()
-    for h_list in t20_h.values():
-        f_occurences.update(h_list)
-    table = pd.DataFrame(f_occurences.most_common(20), columns=["feature", "hours_in_top20"])
-    table["percentage_of_24_hours"] = (table["hours_in_top20"]/24 * 100).round(1)
-    table.index = range(1, len(table)+1)
-    table.to_csv("top20_presence_table.csv")
+    # f_occurences = Counter()
+    # for h_list in t20_h.values():
+    #     f_occurences.update(h_list)
+    # table = pd.DataFrame(f_occurences.most_common(20), columns=["feature", "hours_in_top20"])
+    # table["percentage_of_24_hours"] = (table["hours_in_top20"]/24 * 100).round(1)
+    # table.index = range(1, len(table)+1)
+    # table.to_csv("top20_presence_table.csv")
