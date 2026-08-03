@@ -40,7 +40,6 @@ test_set = test_set[top_feats + keep]
 
 features = top_feats + keep
 # USING TRAIN SET MEAN AND STD for z-score normalization
-
 f_mean = train_set[features].mean()
 f_std = train_set[features].std()
 
@@ -50,7 +49,7 @@ test_set[features] = (test_set[features] - f_mean) / f_std
 print(f"f_mean: {f_mean}, f_std:{f_std}")
 print(f"f_mean length: {len(f_mean)} f_std length: {len(f_std)}")
 
-checkpoint_dir = Path("primary_model/checkpoints")
+checkpoint_dir = Path("primary_model/final_checkpoints")
 checkpoint_dir.mkdir(exist_ok=True)
 
 class ElectricityDemandDataset(Dataset):
@@ -209,9 +208,9 @@ def test_evaluation(model, loader, d_mean, d_std, device):
         p_dict = {k: v.to(device) for k, v in p_dict.items()}
         fut_dict = {k: v.to(device) for k, v in fut_dict.items()}
         
-        n_forecast, intp = model(p_dict, fut_dict)
+        n_forecast, intp = model(p_dict, fut_dict) # (B, 24, 3)
         forecast_mw = (n_forecast * d_std) + d_mean
-        gt_mw = (target * d_std) + d_mean
+        gt_mw = (target * d_std) + d_mean # (B, 24)
 
         a_forecasts_mw.append(forecast_mw.cpu())
         a_gts_mw.append(gt_mw.cpu())
@@ -219,23 +218,34 @@ def test_evaluation(model, loader, d_mean, d_std, device):
         a_decoder_weights.append(intp["decoder_vsn_weights"].cpu())
         a_attention_weights.append(intp["attention_weights"].cpu())
     # concatenate along the first dimension (rows)) --> column count is 24 (for each hour) so it matches for all
-    forecasts_mw = torch.cat(a_forecasts_mw, dim=0)
+    forecasts_mw = torch.cat(a_forecasts_mw, dim=0).squeeze(-1)
     gts_mw = torch.cat(a_gts_mw, dim=0)
     encoder_weights = torch.cat(a_encoder_weights, dim=0)
     decoder_weights = torch.cat(a_decoder_weights, dim=0)
     attention_weights = torch.cat(a_attention_weights, dim=0)
-    # l1 loss is mean absolute error
-    mae = F.l1_loss(forecasts_mw, gts_mw).item()
-    rmse = torch.sqrt(F.mse_loss(forecasts_mw, gts_mw)).item()
-    mape = (torch.abs((forecasts_mw - gts_mw)/gts_mw).mean() * 100).item()
-    r2 = calc_r2(forecasts_mw, gts_mw)
-    # create list for plotting later in order to compare it with xgboost performance
-    r2_everyh = [calc_r2(forecasts_mw[:,hour], gts_mw[:, hour]) for hour in range(24)]
-    mae_everyh = [F.l1_loss(forecasts_mw[:, hour], gts_mw[:, hour]).item() for hour in range(24)]
-    metrics = {"MAPE": mape, "RMSE": rmse,"MAE": mae, "R2": r2, "MAE_H": mae_everyh, "R2_H": r2_everyh}
 
-    return metrics, {"f_mw": forecasts_mw, "t_mw": gts_mw, "encoder_weights": encoder_weights,
-                     "decoder_weights": decoder_weights, "attention_weights": attention_weights}
+    # extract quantile = 0.5
+    med_forecast = forecasts_mw[...,1]
+
+    # l1 loss is mean absolute error
+    mae = F.l1_loss(med_forecast, gts_mw).item()
+    rmse = torch.sqrt(F.mse_loss(med_forecast, gts_mw)).item()
+    mape = (torch.abs((med_forecast - gts_mw)/gts_mw).mean() * 100).item()
+    r2 = calc_r2(med_forecast, gts_mw)
+
+    # quantile coverage (values that are inside  0.1 to 0.9 quantile)
+    first, third = forecasts_mw[..., 0], forecasts_mw[..., 2]
+    coverage = ((gts_mw >= first) & (gts_mw <= third)).float().mean().item()
+
+    # create list for plotting later in order to compare it with xgboost performance
+    r2_everyh = [calc_r2(med_forecast[:,hour], gts_mw[:, hour]) for hour in range(24)]
+    mae_everyh = [F.l1_loss(med_forecast[:, hour], gts_mw[:, hour]).item() for hour in range(24)]
+    metrics = {"MAPE": mape, "RMSE": rmse,"MAE": mae, "R2": r2, "MAE_H": mae_everyh, "R2_H": r2_everyh,
+               "coverage_80": coverage}
+
+    return metrics, {"f_mw": forecasts_mw, "t_mw": gts_mw, "median_forecast": med_forecast,
+                     "encoder_weights": encoder_weights, "decoder_weights": decoder_weights,
+                     "attention_weights": attention_weights}
 
 def tft_feat_importance(encoder_weights, attention_weights, encoder_length=168):
     # encoder weights contain 1 weight for each feature and each hour that has been observed (in the past)
@@ -275,47 +285,49 @@ if __name__ == "__main__":
     )
     print(len(train_ds), len(val_ds), len(test_ds))
     
-    study = optuna.create_study(
-        direction="minimize",
-        # halts trials  that are peforming worse than median
-        pruner=optuna.pruners.MedianPruner(n_startup_trials=3, n_warmup_steps=3)
-    )
-    study.optimize(
-        lambda trial: objective(trial, train_ds, val_ds, past_feature_names, future_feature_names, device),
-        n_trials=10
-    )
-    print("BEST TRIAL:", study.best_trial.number, study.best_trial.params)
+    # study = optuna.create_study(
+    #     direction="minimize",
+    #     # halts trials  that are peforming worse than median
+    #     pruner=optuna.pruners.MedianPruner(n_startup_trials=3, n_warmup_steps=3)
+    # )
+    # study.optimize(
+    #     lambda trial: objective(trial, train_ds, val_ds, past_feature_names, future_feature_names, device),
+    #     n_trials=10
+    # )
+    # print("BEST TRIAL:", study.best_trial.number, study.best_trial.params)
+
+    #BEST TRIAL: 2 {'bs': 64, 'lr': 0.0009156059832357578, 'hs': 128, 'dropout': 0.18762414138561495, 'n_heads': 1}
 
     # PERFORMANCE EVALUATION BELOW
-    # d_mean = f_mean["ontario_demand_mw"]
-    # d_std = f_std["ontario_demand_mw"]
-    # test_loader = DataLoader(train_ds, batch_size=64, shuffle=True)
-    # cp = torch.load("/Users/chloekentebe/enerstasis-electricity-forecaster/primary_model/checkpoints/trial07_h128_lr4e-04_bs64_do0.17_heads4_epoch25_best.pt", "cpu")
-    # model = TemporalFusionTransformer(
-    #     past_feature_names, future_feature_names,
-    #     input_size=128, hidden_size=128,
-    #     n_heads=cp["config"]["n_heads"], dropout=cp["config"]["dropout"],
-    # ).to("cpu")
-    # model.load_state_dict(cp["model_state"])
-    # metrics, results = test_evaluation(model, test_loader, d_mean, d_std, "cpu")
-    # print(metrics)
-    # #print(results)
-    # importance = tft_feat_importance(results["encoder_weights"], results["attention_weights"])
-    # # dataframe for top 10 features per forecast hour
-    # t20_h = {}
-    # for h in range(24):
-    #     h_imp = importance[h]
-    #     inds = h_imp.argsort(descending=True)[:20]
-    #     t20_h[f"hour_{h+1}"] = [past_feature_names[ind] for ind in inds]
-    # top20_feats = pd.DataFrame(t20_h)
-    # top20_feats.index = [f"rank_{n+1}" for n in range(20)]
-    # print(top20_feats)
-    # top20_feats.to_csv("top20_feats_ph.csv")
+    d_mean = f_mean["ontario_demand_mw"]
+    d_std = f_std["ontario_demand_mw"]
+    test_loader = DataLoader(test_ds, batch_size=64, shuffle=True)
+    cp = torch.load("/Users/chloekentebe/enerstasis-electricity-forecaster/primary_model/final_checkpoints/final_trial02_h128_lr9e-04_bs64_do0.19_heads1_epoch17.pt", "cpu")
+    model = TemporalFusionTransformer(
+        past_feature_names, future_feature_names,
+        input_size=128, hidden_size=128,
+        n_heads=cp["config"]["n_heads"], dropout=cp["config"]["dropout"],
+    ).to("cpu")
+    model.load_state_dict(cp["model_state"])
+    metrics, results = test_evaluation(model, test_loader, d_mean, d_std, "cpu")
+    print(metrics)
+    #print(results)
+    importance = tft_feat_importance(results["encoder_weights"], results["attention_weights"])
+    # dataframe for top 10 features per forecast hour
+    t20_h = {}
+    for h in range(24):
+        h_imp = importance[h]
+        inds = h_imp.argsort(descending=True)[:20]
+        t20_h[f"hour_{h+1}"] = [past_feature_names[ind] for ind in inds]
+    top20_feats = pd.DataFrame(t20_h)
+    top20_feats.index = [f"rank_{n+1}" for n in range(20)]
+    print(top20_feats)
+    top20_feats.to_csv("top20_feats_ph_aug3_quant.csv")
     
-    # f_occurences = Counter()
-    # for h_list in t20_h.values():
-    #     f_occurences.update(h_list)
-    # table = pd.DataFrame(f_occurences.most_common(20), columns=["feature", "hours_in_top20"])
-    # table["percentage_of_24_hours"] = (table["hours_in_top20"]/24 * 100).round(1)
-    # table.index = range(1, len(table)+1)
-    # table.to_csv("top20_presence_table.csv")
+    f_occurences = Counter()
+    for h_list in t20_h.values():
+        f_occurences.update(h_list)
+    table = pd.DataFrame(f_occurences.most_common(20), columns=["feature", "hours_in_top20"])
+    table["percentage_of_24_hours"] = (table["hours_in_top20"]/24 * 100).round(1)
+    table.index = range(1, len(table)+1)
+    table.to_csv("top20_presence_table_aug3_quant.csv")
