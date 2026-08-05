@@ -23,7 +23,7 @@ class TemporalFusionTransformer(nn.Module):
     Leverages all architecture blocks and functions constructed below to build the overarching model.
     """
     def __init__(self, past_feature_names, future_feature_names, input_size=64,
-                 hidden_size=64, n_heads=1, dropout=0.1, encoder_len=168, decoder_len=24):
+                 hidden_size=64, n_heads=1, dropout=0.1, encoder_len=168, decoder_len=24, num_layers=2):
         super().__init__()
         # *** Ingredients (architecture components) for the entire model ***
         self.encoder_len = encoder_len
@@ -39,7 +39,7 @@ class TemporalFusionTransformer(nn.Module):
         self.encoder_vsn = VariableSelectionNetwork(past_feature_names, input_size, hidden_size, dropout)
         self.decoder_vsn = VariableSelectionNetwork(future_feature_names, input_size, hidden_size, dropout)
 
-        self.lstm = LSTMEncoderDecoder(hidden_size, num_layers=1, dropout=0.0)
+        self.lstm = LSTMEncoderDecoder(hidden_size, num_layers=num_layers, dropout=dropout)
         self.post_lstm_gate = GateAddNorm(hidden_size, hidden_size, dropout)
 
         # Static enrichment GRN, context=None in v1, which behaves as a plain 2-layer residual block
@@ -246,7 +246,7 @@ class LSTMEncoderDecoder(nn.Module):
 
     Purpose: process short-term temporal relationships from past and known future inputs.
     """
-    def __init__(self, hidden_size, num_layers=1, dropout=0.0):
+    def __init__(self, hidden_size, num_layers=2, dropout=0.0):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_layers = num_layers

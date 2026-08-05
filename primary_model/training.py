@@ -15,6 +15,7 @@ from sklearn.metrics import (
 from model import TemporalFusionTransformer
 import time
 from collections import Counter
+import os
 
 directory = Path("processed_data")
 file = directory / "main_dataset.csv"
@@ -23,7 +24,7 @@ main = pd.read_csv(file)
 impor_dir = Path("notebooks")
 f = impor_dir / "xgboost_feature_importance.csv"
 df_import = pd.read_csv(f)
-top_feats = df_import.sort_values("importance", ascending=False).head(102)["feature"].tolist()
+top_feats = df_import.sort_values("importance", ascending=False).head(100)["feature"].tolist()
 keep = ["ontario_demand_mw", "season_fall", "phev_registration", "total_large_load_mw"]
 main_trimmed = main[top_feats + keep].copy()
 print(main_trimmed)
@@ -49,13 +50,14 @@ test_set[features] = (test_set[features] - f_mean) / f_std
 print(f"f_mean: {f_mean}, f_std:{f_std}")
 print(f"f_mean length: {len(f_mean)} f_std length: {len(f_std)}")
 
-checkpoint_dir = Path("primary_model/final_checkpoints")
+#checkpoint_dir = Path("primary_model/lucky_optimized_final_checkpoints") #777
+checkpoint_dir = Path("primary_model/last_lucky_optimized_checkpoints") #777
 checkpoint_dir.mkdir(exist_ok=True)
 
 class ElectricityDemandDataset(Dataset):
     # Divides an hourly dataframe into (168h past, 24h future) windows for training.
     def __init__(self, df, past_feature_names, future_feature_names, target_col,
-                 encoder_len=168, decoder_len=24, stride=12):
+                 encoder_len=168, decoder_len=24, stride=24):
         self.df = df.reset_index(drop=True)
         self.past_feature_names = past_feature_names
         self.future_feature_names = future_feature_names
@@ -98,18 +100,22 @@ def classify_feature_names(df, target_col, exclude_columns=None):
     return fut_columns, past_columns
 
 # ADDED: loss function for quantile predictions (0.1, 0.5, 0.9 as used in paper)
-def quant_loss(target, predictions, quantiles=(0.1, 0.5, 0.9)):
+def quant_loss(target, predictions, quantiles=(0.1, 0.5, 0.9), t_weight=2.0, h_weights=None):
     # adds a final dimension with size 1 in order to compare
     loss_list = []
     for num, qt in enumerate(quantiles):
          # subtract forecast (B, 24) from target (B, 24)
          errors = target - predictions[..., num]
+         loss = torch.max((qt - 1)*errors, qt*errors)
+         weight = t_weight if qt != 0.5 else 1.0
+         if h_weights is not None:
+              loss = loss * h_weights.unsqueeze(0)
          # pinball (quantile) loss --> model is more penalized when q=0.9 vs q=0.1
-         loss_list.append(torch.max((qt - 1)*errors, qt*errors))
+         loss_list.append(weight * loss)
     # averaging is smoother for backpropogation
     return torch.stack(loss_list, dim=-1).mean() # (B, 24, 3)
 
-def train_for_one_epoch(device, model, tr_loader, optimizer):
+def train_for_one_epoch(device, model, tr_loader, optimizer, tail_weight, hour_weights, max_grad_norm):
     model.train()
     total_loss = 0.0
     for target, fut_dict, p_dict in tr_loader:
@@ -119,13 +125,14 @@ def train_for_one_epoch(device, model, tr_loader, optimizer):
         optimizer.zero_grad()
         forecast, _ = model(p_dict, fut_dict)
         #loss = F.mse_loss(forecast, target)
-        loss = quant_loss(target, forecast, quantiles=(0.1, 0.5, 0.9))
+        loss = quant_loss(target, forecast, quantiles=(0.1, 0.5, 0.9), t_weight=tail_weight, h_weights=hour_weights)
         loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=max_grad_norm) # address some oscillations in val loss
         optimizer.step()
         total_loss += loss.item() * target.size(0)
     return total_loss / len(tr_loader.dataset)
 
-def get_val_loss(device, model, val_loader, ):
+def get_val_loss(device, model, val_loader, tail_weight, hour_weights):
     model.eval()
     total_loss = 0.0
     with torch.no_grad():
@@ -135,34 +142,58 @@ def get_val_loss(device, model, val_loader, ):
             fut_dict = {k: v.to(device) for k, v in fut_dict.items()}
             forecast, _ = model(p_dict, fut_dict)
             #loss = F.mse_loss(forecast, target)
-            loss = quant_loss(target, forecast, quantiles=(0.1, 0.5, 0.9))
+            loss = quant_loss(target, forecast, quantiles=(0.1, 0.5, 0.9), t_weight=tail_weight, h_weights=hour_weights)
             total_loss += loss.item() * target.size(0)
-        return total_loss / len(val_loader.dataset)
+    model.train()
+    return total_loss / len(val_loader.dataset)
 
 # objective function for optuna (metrics to optimize)
-def objective(trial, train_ds, val_ds, past_feature_names, future_feature_names, device, max_epochs=30):
-    bs = trial.suggest_categorical("bs", [64, 128])
-    lr = trial.suggest_float("lr", 0.0001, 0.001, log=True)
-    hs = trial.suggest_categorical("hs", [32, 64, 128])
-    dropout = trial.suggest_float("dropout", 0.05, 0.3)
-    n_heads = trial.suggest_categorical("n_heads", [1, 4])
+def objective(trial, train_ds, val_ds, past_feature_names, future_feature_names, device, max_epochs=40):
+    # bs = trial.suggest_categorical("bs", [32, 64])
+    # lr = trial.suggest_float("lr", 0.0001, 0.01, log=True)
+    # hs = trial.suggest_categorical("hs", [32, 64])
+    # dropout = trial.suggest_float("dropout", 0.1, 0.6)
+    # n_heads = trial.suggest_categorical("n_heads", [1, 4])
+    # num_layers = trial.suggest_categorical("num_layers", [1, 2])
+    # weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-4, log=True)
+    # tail_weight = trial.suggest_float("tail_weight", 1.2, 3.0)
+    # hour_weight = trial.suggest_float("hour_weight", 1.0, 2.0)
+    # max_grad_norm = trial.suggest_categorical("max_grad_norm", [0.01, 1.0, 100.0])
+
+    bs = trial.suggest_categorical("bs", [32])
+    lr = trial.suggest_float("lr", 0.0001, 0.0007, log=True)
+    hs = trial.suggest_categorical("hs", [64])
+    dropout = trial.suggest_float("dropout", 0.45, 0.6)
+    n_heads = trial.suggest_categorical("n_heads", [4])
+    num_layers = trial.suggest_categorical("num_layers", [1])
+    weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-4, log=True)
+    tail_weight = trial.suggest_float("tail_weight", 1.2, 1.3)
+    hour_weight = trial.suggest_float("hour_weight", 1.05, 1.1)
+    max_grad_norm = trial.suggest_categorical("max_grad_norm", [1.0])
 
     tr_loader = DataLoader(train_ds, batch_size=bs, shuffle=True)
     val_loader = DataLoader(val_ds, batch_size=bs, shuffle=False)
 
     model = TemporalFusionTransformer(past_feature_names, future_feature_names, input_size=hs,
-                                      hidden_size=hs, n_heads=n_heads, dropout=dropout).to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-    naming = f"final_trial{trial.number:02d}_h{hs}_lr{lr:.0e}_bs{bs}_do{dropout:.2f}_heads{n_heads}"
+                                      hidden_size=hs, n_heads=n_heads, dropout=dropout, num_layers=num_layers).to(device)
+    model = model.to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=0.5, patience=3)
+    naming = f"final_trial{trial.number:02d}_h{hs}_lr{lr:.2e}_bs{bs}_do{dropout:.2f}_heads{n_heads}_layers{num_layers}_wd{weight_decay:.2e}_gn{max_grad_norm}"
     best_val_loss = float("inf")
     loss_hist = {"train_loss": [], "val_loss": []}
+    
+    hour_weights = torch.ones(24, device=device)
+    hour_weights[4:] = hour_weight
 
     for epoch in range(max_epochs):
         str = time.time()
-        tr_loss = train_for_one_epoch(device, model, tr_loader, optimizer)
+        tr_loss = train_for_one_epoch(device, model, tr_loader, optimizer, tail_weight, hour_weights, max_grad_norm)
         elapsed = time.time() - str
-        print(f"1 epoch at 100 features and stride=24: {elapsed/60:1f} minutes")
-        curr_val_loss = get_val_loss(device, model, val_loader)
+        print(f"1 epoch at ~100 features and stride=24: {elapsed/60:1f} minutes")
+        curr_val_loss = get_val_loss(device, model, val_loader, tail_weight, hour_weights)
+        scheduler.step(curr_val_loss) # decay lr udinr gtraining
+        #print(f"current LR: {optimizer.param_groups[0]['lr']}")
         loss_hist["val_loss"].append(curr_val_loss)
         loss_hist["train_loss"].append(tr_loss)
 
@@ -236,12 +267,13 @@ def test_evaluation(model, loader, d_mean, d_std, device):
     # quantile coverage (values that are inside  0.1 to 0.9 quantile)
     first, third = forecasts_mw[..., 0], forecasts_mw[..., 2]
     coverage = ((gts_mw >= first) & (gts_mw <= third)).float().mean().item()
+    crossing_qs = (forecasts_mw[...,0] > forecasts_mw[..., 2]).float().mean()
 
     # create list for plotting later in order to compare it with xgboost performance
     r2_everyh = [calc_r2(med_forecast[:,hour], gts_mw[:, hour]) for hour in range(24)]
     mae_everyh = [F.l1_loss(med_forecast[:, hour], gts_mw[:, hour]).item() for hour in range(24)]
     metrics = {"MAPE": mape, "RMSE": rmse,"MAE": mae, "R2": r2, "MAE_H": mae_everyh, "R2_H": r2_everyh,
-               "coverage_80": coverage}
+               "coverage_80": coverage, "crossing_quantiles": crossing_qs}
 
     return metrics, {"f_mw": forecasts_mw, "t_mw": gts_mw, "median_forecast": med_forecast,
                      "encoder_weights": encoder_weights, "decoder_weights": decoder_weights,
@@ -256,14 +288,15 @@ def tft_feat_importance(encoder_weights, attention_weights, encoder_length=168):
     return result
 
 if __name__ == "__main__":
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(device)
+    os.environ["PYTROCH_ENABLE_MPS_FALLBACK"] = "1" # to address potential NotImplementedErrors
+    device = torch.device("mps" if torch.backends.mps.is_available() else "cpu")
+    print(f"Using {device}")
 
-    ex_columns=["demand_lag_1", "demand_rolling24_mean", "timestamp"]
+    #ex_columns=["demand_lag_1", "demand_rolling24_mean", "timestamp"]
+    ex_columns=["timestamp"]
     future_feature_names, past_feature_names = classify_feature_names(main_trimmed, target_col="ontario_demand_mw", exclude_columns=ex_columns)
     print(f"Past feature names: {past_feature_names} of length {len(past_feature_names)}")
     print(f"Future feature names: {future_feature_names} of length {len(future_feature_names)}")
-
 
     train_ds = ElectricityDemandDataset(
         df=train_set,
@@ -292,25 +325,35 @@ if __name__ == "__main__":
     # )
     # study.optimize(
     #     lambda trial: objective(trial, train_ds, val_ds, past_feature_names, future_feature_names, device),
-    #     n_trials=10
+    #     n_trials=3, timeout=60*60*5
     # )
     # print("BEST TRIAL:", study.best_trial.number, study.best_trial.params)
 
-    #BEST TRIAL: 2 {'bs': 64, 'lr': 0.0009156059832357578, 'hs': 128, 'dropout': 0.18762414138561495, 'n_heads': 1}
+    # Trial 35 finished with value: 0.07254158059207115 and parameters: {'bs': 32, 'lr': 0.0061199023635718375, 'hs': 64, 'dropout': 0.4005564297246164, 'n_heads': 4, 'num_layers': 1, 'weight_decay': 5.8980375753540913e-05, 'tail_weight': 1.2019880423565545, 'hour_weight': 1.0768943546157816, 'max_grad_norm': 1.0}. Best is trial 35 with value: 0.07254158059207115.
+    # Trial 21 finished with value: 0.07426634484397772 and parameters: {'bs': 32, 'lr': 0.0006745126882491746, 'hs': 64, 'dropout': 0.4571255562725678, 'n_heads': 4, 'num_layers': 1, 'weight_decay': 9.471986988862709e-05, 'tail_weight': 1.2115327068967645, 'hour_weight': 1.0721981541030423, 'max_grad_norm': 1.0}. Best is trial 21 with value: 0.07426634484397772.
+    # Trial 11 h64_lr1.05e-04_bs32_do0.50_heads4_layers1_wd8.97e-05_gn1.0 --> 0.74 decent coverage
+    
+    # BEST TRIAL METRICS then
+    # TEST 3 around these parameters with 40 epochs
+
+    # Trial 2 finished with value: 0.07442604174106819 and parameters: {'bs': 32, 'lr': 0.0002602961528467961, 'hs': 64, 'dropout': 0.4698414733118946, 'n_heads': 4, 'num_layers': 1, 'weight_decay': 3.6689608401402046e-05, 'tail_weight': 1.284187557799813, 'hour_weight': 1.0573033533371015, 'max_grad_norm': 1.0}. Best is trial 2 with value: 0.07442604174106819.
+    # noticed that higher coverage meant lower peformance
 
     # PERFORMANCE EVALUATION BELOW
     d_mean = f_mean["ontario_demand_mw"]
     d_std = f_std["ontario_demand_mw"]
-    test_loader = DataLoader(test_ds, batch_size=64, shuffle=True)
-    cp = torch.load("/Users/chloekentebe/enerstasis-electricity-forecaster/primary_model/final_checkpoints/final_trial02_h128_lr9e-04_bs64_do0.19_heads1_epoch17.pt", "cpu")
+    test_loader = DataLoader(test_ds, batch_size=32, shuffle=True)
+    cp = torch.load("/Users/chloekentebe/enerstasis-electricity-forecaster/primary_model/lucky_optimized_final_checkpoints/final_trial21_h64_lr6.75e-04_bs32_do0.46_heads4_layers1_wd9.47e-05_gn1.0_epoch28.pt", device)
+    hs = 64
     model = TemporalFusionTransformer(
         past_feature_names, future_feature_names,
-        input_size=128, hidden_size=128,
-        n_heads=cp["config"]["n_heads"], dropout=cp["config"]["dropout"],
-    ).to("cpu")
+        input_size=hs, hidden_size=hs,
+        n_heads=cp["config"]["n_heads"], dropout=cp["config"]["dropout"], num_layers=1
+    ).to(device)
     model.load_state_dict(cp["model_state"])
-    metrics, results = test_evaluation(model, test_loader, d_mean, d_std, "cpu")
+    metrics, results = test_evaluation(model, test_loader, d_mean, d_std, device)
     print(metrics)
+    print(f"Fraction of predictions with cross quantiles: {metrics['crossing_quantiles']:.3f}")
     #print(results)
     importance = tft_feat_importance(results["encoder_weights"], results["attention_weights"])
     # dataframe for top 10 features per forecast hour
@@ -322,7 +365,7 @@ if __name__ == "__main__":
     top20_feats = pd.DataFrame(t20_h)
     top20_feats.index = [f"rank_{n+1}" for n in range(20)]
     print(top20_feats)
-    top20_feats.to_csv("top20_feats_ph_aug3_quant.csv")
+    top20_feats.to_csv("top20_feats_ph_aug4_quant_2.csv")
     
     f_occurences = Counter()
     for h_list in t20_h.values():
@@ -330,4 +373,4 @@ if __name__ == "__main__":
     table = pd.DataFrame(f_occurences.most_common(20), columns=["feature", "hours_in_top20"])
     table["percentage_of_24_hours"] = (table["hours_in_top20"]/24 * 100).round(1)
     table.index = range(1, len(table)+1)
-    table.to_csv("top20_presence_table_aug3_quant.csv")
+    table.to_csv("top20_presence_table_aug4_quant_2.csv")
