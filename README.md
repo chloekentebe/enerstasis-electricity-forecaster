@@ -15,7 +15,7 @@ This project uses data from multiple sources:
 ```text
 data/
 preprocessing/
-primry_model/
+primary_model/
 xgboost_model/
 notebooks/
 
