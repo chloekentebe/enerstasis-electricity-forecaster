@@ -66,8 +66,8 @@ scenarios_to_explore = {
 scenario_engine = ScenarioEngine(model, f_mean, f_std, past_feature_names, future_feature_names, device)
 keep = ["ontario_demand_mw", "season_fall", "phev_registration", "total_large_load_mw", "timestamp"]
 df = main[top_feats + keep].copy()
-# July 1 - Canada Day
-index = df.index.get_loc(df[df["timestamp"] == "2026-07-01 00:00:00"].index[0])
+# March 17, 2026 --> St. Patrick's Day
+index = df.index.get_loc(df[df["timestamp"] == "2026-03-17 00:00:00"].index[0])
 # this interval is part of the test dataset since it contains df data from 2025 onwards
 encoder_df, decoder_df = extract_windows(df, index, past_feature_names, future_feature_names)
 
@@ -94,7 +94,7 @@ print(f"Peak Demand: {results_load['base_peak_mw']} MW --> {results_load['scenar
       f"Peak Shift: {results_load['peak_shift_mw']} MW")
 print(f"Peak Hour: {results_load['peak_hour_base']} --> {results_load['peak_hour_scenario']} "
       f"Average Shift: {results_load['average_shift_mw']} MW")
-# DIFFERENCE BETWEEN UPPER AND LOWER QUANTILE
+# Difference between upper and lower quantile
 print(f"Band of Uncertainty: {results_load['bandwidth_base']} MW --> {results_load['bandwidth_scenario']} MW")
 print()
 
@@ -105,7 +105,7 @@ print(f"Peak Demand: {results_ev['base_peak_mw']} MW --> {results_ev['scenario_p
       f"Peak Shift: {results_ev['peak_shift_mw']} MW")
 print(f"Peak Hour: {results_ev['peak_hour_base']} --> {results_ev['peak_hour_scenario']} "
       f"Average Shift: {results_ev['average_shift_mw']} MW")
-# DIFFERENCE BETWEEN UPPER AND LOWER QUANTILE
+# Difference between upper and lower quantile
 print(f"Band of Uncertainty: {results_ev['bandwidth_base']} MW --> {results_ev['bandwidth_scenario']} MW")
 print()
 
@@ -116,5 +116,5 @@ print(f"Peak Demand: {results_solar['base_peak_mw']} MW --> {results_solar['scen
       f"Peak Shift: {results_solar['peak_shift_mw']} MW")
 print(f"Peak Hour: {results_solar['peak_hour_base']} --> {results_solar['peak_hour_scenario']} "
       f"Average Shift: {results_solar['average_shift_mw']} MW")
-# DIFFERENCE BETWEEN UPPER AND LOWER QUANTILE
+# Difference between upper and lower quantile
 print(f"Band of Uncertainty: {results_solar['bandwidth_base']} MW --> {results_solar['bandwidth_scenario']} MW")

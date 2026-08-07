@@ -45,64 +45,59 @@ print(val_labels.shape)
 print(testing_labels.shape)
 
 # insantiate model
-# model = MultiOutputRegressor(
-#     XGBRegressor(
-#         random_state=42,
-#         n_jobs = -1,
-#     )
-# )
+model = MultiOutputRegressor(
+    XGBRegressor(
+        random_state=42,
+        n_jobs = -1,
+    )
+)
 
-# params = {
-#     "estimator__n_estimators": [500, 800, 1200],
-#     "estimator__learning_rate": [0.01, 0.03, 0.05, 0.1],
-#     "estimator__max_depth": [4, 6, 8, 10],
-#     "estimator__min_child_weight": [1, 3, 5, 7],
-#     "estimator__subsample": [0.7, 0.8, 0.9, 1.0], # prevent overfitting
-#     "estimator__colsample_bytree": [0.6, 0.8, 1.0], # prevent overfitting
-#     "estimator__gamma": [0, 0.1, 0.5, 1], # minimum decrease in loss for algo to make another partition on leaf node
-#     "estimator__reg_alpha": [0, 0.01, 0.1, 1],
-#     "estimator__reg_lambda": [1, 2, 5, 10],
-# }
+params = {
+    "estimator__n_estimators": [500, 800, 1200],
+    "estimator__learning_rate": [0.01, 0.03, 0.05, 0.1],
+    "estimator__max_depth": [4, 6, 8, 10],
+    "estimator__min_child_weight": [1, 3, 5, 7],
+    "estimator__subsample": [0.7, 0.8, 0.9, 1.0], # prevent overfitting
+    "estimator__colsample_bytree": [0.6, 0.8, 1.0], # prevent overfitting
+    "estimator__gamma": [0, 0.1, 0.5, 1], # minimum decrease in loss for algo to make another partition on leaf node
+    "estimator__reg_alpha": [0, 0.01, 0.1, 1],
+    "estimator__reg_lambda": [1, 2, 5, 10],
+}
 
-# tscv = TimeSeriesSplit(n_splits=5)
+tscv = TimeSeriesSplit(n_splits=5)
 
-# # set up random search
-# rand_srch = RandomizedSearchCV(
-#     estimator=model,
-#     param_distributions=params,
-#     n_iter=10, #*****MODIFIED THIS
-#     scoring="neg_mean_squared_error", # industry standard
-#     cv=tscv, # prevents timeline getting shuffled
-#     verbose=2,
-#     random_state=42
-# )
+# set up random search
+rand_srch = RandomizedSearchCV(
+    estimator=model,
+    param_distributions=params,
+    n_iter=10, 
+    scoring="neg_mean_squared_error", # industry standard
+    cv=tscv, # prevents timeline getting shuffled
+    verbose=2,
+    random_state=42
+)
 
-# # fit model
-# rand_srch.fit(training_data, training_labels,
-#     verbose=False
-# )
-# print("Best parameters:", rand_srch.best_params_)
-# best_model = rand_srch.best_estimator_
-# direc = Path("xgboost_model")
-# fl = direc / "forecast_best_xgboost_model_j30.json"
-# best_model.save_model(fl)
-# feature_columns = list(training_data.columns)
-# fl2 = direc / "forecast_feature_columns_j30.json"
-# with open(fl2, "w") as f:
-#     json.dump(feature_columns, f)
+# fit model
+rand_srch.fit(training_data, training_labels,
+    verbose=False
+)
+print("Best parameters:", rand_srch.best_params_)
+best_model = rand_srch.best_estimator_
+direc = Path("xgboost_model")
+fl = direc / "forecast_best_xgboost_model_j30.json"
+best_model.save_model(fl)
+feature_columns = list(training_data.columns)
+fl2 = direc / "forecast_feature_columns_j30.json"
+with open(fl2, "w") as f:
+    json.dump(feature_columns, f)
 
-# xgboost_params = {
-#     key.replace("estimator__", ""): value
-#     for key, value in rand_srch.best_params_.items()
-# }
+xgboost_params = {
+    key.replace("estimator__", ""): value
+    for key, value in rand_srch.best_params_.items()
+}
 
 # PERFORMANCE EVALUATION BELOW
 
-# Best parameters: {'estimator__subsample': 0.9, 'estimator__reg_lambda': 5, 'estimator__reg_alpha':
-# 0, 'estimator__n_estimators': 1200, 'estimator__min_child_weight': 3, 'estimator__max_depth': 6,
-# 'estimator__learning_rate': 0.03, 'estimator__gamma': 0.1, 'estimator__colsample_bytree': 0.8}
-
-# FROM UPDATED DATATEST
 # Best parameters: {'estimator__subsample': 0.9, 'estimator__reg_lambda': 5, 'estimator__reg_alpha': 0,
 #                   'estimator__n_estimators': 1200, 'estimator__min_child_weight': 7, 'estimator__max_depth': 6,
 #                   'estimator__learning_rate': 0.01, 'estimator__gamma': 1, 'estimator__colsample_bytree': 0.8}

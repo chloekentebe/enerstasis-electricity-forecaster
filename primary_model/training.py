@@ -30,14 +30,13 @@ main_trimmed = main[top_feats + keep].copy()
 print(main_trimmed)
 
 # chronological split
-train_set = main[main["timestamp"] < "2022-12-31"] # 8 years / ~11.465 years = 70%
-val_set = main[(main["timestamp"] >= "2023-01-01") & (main["timestamp"] < "2025-01-01")] # 2 years / ~11.465 years = 17.4%
-test_set = main[main["timestamp"] >= "2025-01-01"] # 1.465 years / 11.465 years = 12.8%
-#main = main.drop(columns=[f"demand_target_hour_{hour}" for hour in range(1, 25)])
+train_set = main[main["timestamp"] < "2022-12-31"] 
+val_set = main[(main["timestamp"] >= "2023-01-01") & (main["timestamp"] < "2025-01-01")] 
+test_set = main[main["timestamp"] >= "2025-01-01"] 
+
 train_set = train_set[top_feats + keep]
 val_set = val_set[top_feats + keep]
 test_set = test_set[top_feats + keep]
-
 
 features = top_feats + keep
 # USING TRAIN SET MEAN AND STD for z-score normalization
@@ -99,7 +98,7 @@ def classify_feature_names(df, target_col, exclude_columns=None):
     past_columns = [col for col in columns if col not in fut_columns]
     return fut_columns, past_columns
 
-# ADDED: loss function for quantile predictions (0.1, 0.5, 0.9 as used in paper)
+# loss function for quantile predictions (0.1, 0.5, 0.9 as used in paper)
 def quant_loss(target, predictions, quantiles=(0.1, 0.5, 0.9), t_weight=2.0, h_weights=None):
     # adds a final dimension with size 1 in order to compare
     loss_list = []
@@ -141,7 +140,6 @@ def get_val_loss(device, model, val_loader, tail_weight, hour_weights):
             p_dict = {k: v.to(device) for k, v in p_dict.items()}
             fut_dict = {k: v.to(device) for k, v in fut_dict.items()}
             forecast, _ = model(p_dict, fut_dict)
-            #loss = F.mse_loss(forecast, target)
             loss = quant_loss(target, forecast, quantiles=(0.1, 0.5, 0.9), t_weight=tail_weight, h_weights=hour_weights)
             total_loss += loss.item() * target.size(0)
     model.train()
@@ -149,17 +147,6 @@ def get_val_loss(device, model, val_loader, tail_weight, hour_weights):
 
 # objective function for optuna (metrics to optimize)
 def objective(trial, train_ds, val_ds, past_feature_names, future_feature_names, device, max_epochs=40):
-    # bs = trial.suggest_categorical("bs", [32, 64])
-    # lr = trial.suggest_float("lr", 0.0001, 0.01, log=True)
-    # hs = trial.suggest_categorical("hs", [32, 64])
-    # dropout = trial.suggest_float("dropout", 0.1, 0.6)
-    # n_heads = trial.suggest_categorical("n_heads", [1, 4])
-    # num_layers = trial.suggest_categorical("num_layers", [1, 2])
-    # weight_decay = trial.suggest_float("weight_decay", 1e-5, 1e-4, log=True)
-    # tail_weight = trial.suggest_float("tail_weight", 1.2, 3.0)
-    # hour_weight = trial.suggest_float("hour_weight", 1.0, 2.0)
-    # max_grad_norm = trial.suggest_categorical("max_grad_norm", [0.01, 1.0, 100.0])
-
     bs = trial.suggest_categorical("bs", [32])
     lr = trial.suggest_float("lr", 0.0001, 0.0007, log=True)
     hs = trial.suggest_categorical("hs", [64])
@@ -248,6 +235,7 @@ def test_evaluation(model, loader, d_mean, d_std, device):
         a_encoder_weights.append(intp["encoder_vsn_weights"].cpu())
         a_decoder_weights.append(intp["decoder_vsn_weights"].cpu())
         a_attention_weights.append(intp["attention_weights"].cpu())
+
     # concatenate along the first dimension (rows)) --> column count is 24 (for each hour) so it matches for all
     forecasts_mw = torch.cat(a_forecasts_mw, dim=0).squeeze(-1)
     gts_mw = torch.cat(a_gts_mw, dim=0)
@@ -318,26 +306,16 @@ if __name__ == "__main__":
     )
     print(len(train_ds), len(val_ds), len(test_ds))
     
-    # study = optuna.create_study(
-    #     direction="minimize",
-    #     # halts trials  that are peforming worse than median
-    #     pruner=optuna.pruners.MedianPruner(n_startup_trials=3, n_warmup_steps=3)
-    # )
-    # study.optimize(
-    #     lambda trial: objective(trial, train_ds, val_ds, past_feature_names, future_feature_names, device),
-    #     n_trials=3, timeout=60*60*5
-    # )
-    # print("BEST TRIAL:", study.best_trial.number, study.best_trial.params)
-
-    # Trial 35 finished with value: 0.07254158059207115 and parameters: {'bs': 32, 'lr': 0.0061199023635718375, 'hs': 64, 'dropout': 0.4005564297246164, 'n_heads': 4, 'num_layers': 1, 'weight_decay': 5.8980375753540913e-05, 'tail_weight': 1.2019880423565545, 'hour_weight': 1.0768943546157816, 'max_grad_norm': 1.0}. Best is trial 35 with value: 0.07254158059207115.
-    # Trial 21 finished with value: 0.07426634484397772 and parameters: {'bs': 32, 'lr': 0.0006745126882491746, 'hs': 64, 'dropout': 0.4571255562725678, 'n_heads': 4, 'num_layers': 1, 'weight_decay': 9.471986988862709e-05, 'tail_weight': 1.2115327068967645, 'hour_weight': 1.0721981541030423, 'max_grad_norm': 1.0}. Best is trial 21 with value: 0.07426634484397772.
-    # Trial 11 h64_lr1.05e-04_bs32_do0.50_heads4_layers1_wd8.97e-05_gn1.0 --> 0.74 decent coverage
-    
-    # BEST TRIAL METRICS then
-    # TEST 3 around these parameters with 40 epochs
-
-    # Trial 2 finished with value: 0.07442604174106819 and parameters: {'bs': 32, 'lr': 0.0002602961528467961, 'hs': 64, 'dropout': 0.4698414733118946, 'n_heads': 4, 'num_layers': 1, 'weight_decay': 3.6689608401402046e-05, 'tail_weight': 1.284187557799813, 'hour_weight': 1.0573033533371015, 'max_grad_norm': 1.0}. Best is trial 2 with value: 0.07442604174106819.
-    # noticed that higher coverage meant lower peformance
+    study = optuna.create_study(
+        direction="minimize",
+        # halts trials  that are peforming worse than median
+        pruner=optuna.pruners.MedianPruner(n_startup_trials=3, n_warmup_steps=3)
+    )
+    study.optimize(
+        lambda trial: objective(trial, train_ds, val_ds, past_feature_names, future_feature_names, device),
+        n_trials=3, timeout=60*60*5
+    )
+    print("BEST TRIAL:", study.best_trial.number, study.best_trial.params)
 
     # PERFORMANCE EVALUATION BELOW
     d_mean = f_mean["ontario_demand_mw"]
@@ -354,9 +332,10 @@ if __name__ == "__main__":
     metrics, results = test_evaluation(model, test_loader, d_mean, d_std, device)
     print(metrics)
     print(f"Fraction of predictions with cross quantiles: {metrics['crossing_quantiles']:.3f}")
-    #print(results)
+
     importance = tft_feat_importance(results["encoder_weights"], results["attention_weights"])
-    # dataframe for top 10 features per forecast hour
+
+    # dataframe for top 20 features per forecast hour
     t20_h = {}
     for h in range(24):
         h_imp = importance[h]

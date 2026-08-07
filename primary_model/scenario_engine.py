@@ -49,8 +49,9 @@ class ScenarioEngine:
     def apply_modifications(self, decoder_df, modifications):
         df = decoder_df.copy()
         for feat, factor in modifications.items():
-            df[feat] *= factor
+            df[feat] *= factor # create new dataset that includes multiplication factor
         return df
+    
     def extrapolation_guard(self, testing_df, exploration_df):
         # ensures that the training data bounds the possible values in the exp df
         warning = []
@@ -61,6 +62,7 @@ class ScenarioEngine:
                 if e_lower < lower or e_upper > upper:
                     warning.append(f"Beware --> {feat} scenario range {e_lower}, {e_upper}"
                                    f"surpasses training range {lower}, {upper}")
+                    
     def compare(self, encoder_df, decoder_df, modifications, testing_df, scenario_name="unique"):
         # need to extract the unmodified prediction for comparisons
         base, _ = self.predict(encoder_df, decoder_df)
